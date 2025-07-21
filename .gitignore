@@ -1,3 +1,97 @@
+# =========================================================================
+# === General Project Dependencies ===
+# These folders are installed by package managers and are often huge.
+# They should be installed by other developers using requirements.txt or package.json.
+# =========================================================================
+
+# Python virtual environment
+/backend/venv/
+
+# Node.js dependencies
+/frontend/node_modules/
+/frontend/.pnpm-store/ # If you ever use pnpm again
+
+# Dependency lock files (while sometimes committed, we can ignore them for a solo project)
+# If working in a team, you might want to remove these lines to ensure consistent installs.
+# /frontend/package-lock.json
+# /frontend/yarn.lock
+# /frontend/pnpm-lock.yaml
+
+
+# =========================================================================
+# === Credentials & Secrets ===
+# CRITICAL: Never commit files containing secret keys or credentials.
+# =========================================================================
+# Environment variables
 .env
-venv
-node_modules
+.env.*
+
+# =========================================================================
+# === Build Artifacts & Compiled Files ===
+# These files are generated automatically from your source code.
+# They don't need to be in version control.
+# =========================================================================
+
+# Python compiled files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Python distribution and packaging
+build/
+dist/
+*.egg-info/
+
+# React build output
+/frontend/build/
+
+
+# =========================================================================
+# === Logs & Temporary Files ===
+# Log files and other temporary files generated during development.
+# =========================================================================
+*.log
+*.log*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Test reports
+/frontend/coverage/
+htmlcov/
+
+
+# =========================================================================
+# === IDE / Editor Configuration Files ===
+# Personal settings for your code editor.
+# =========================================================================
+
+# VS Code
+/.vscode/
+
+# PyCharm
+/.idea/
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# =========================================================================
+# === Operating System Files ===
+# Annoying files created by macOS, Windows, and Linux.
+# =========================================================================
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
