@@ -1,0 +1,9 @@
+POST http://localhost:5001/api/analyze
+Content-Type: multipart/form-data; boundary=----WebKitFormBoundary7MA4YWxkTrZu0gW
+
+------WebKitFormBoundary7MA4YWxkTrZu0gW
+Content-Disposition: form-data; name="project_zip"; filename="test_project.zip"
+Content-Type: application/zip
+
+<@ "test_project.zip"
+------WebKitFormBoundary7MA4YWxkTrZu0gW--
