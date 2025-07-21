@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import AnalysisReport from './AnalysisReport'; // Import your table component
+import CodeCity from './CodeCity';
 
 function App() {
   const [file, setFile] = useState(null);
@@ -112,6 +113,7 @@ function App() {
 
         {/* Analysis Report - Now uses your imported component */}
         {analysisResult && <AnalysisReport data={analysisResult} />}
+        {analysisResult && <CodeCity data={analysisResult} />} 
       </div>
     </div>
   );
