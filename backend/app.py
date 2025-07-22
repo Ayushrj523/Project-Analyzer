@@ -3,7 +3,7 @@
 Flask Project Analyzer Server
 
 A Flask server that accepts zip files containing Python projects
-and analyzes them for complexity metrics.
+and analyzes them for complexity metrics and dependencies.
 """
 
 import os
@@ -12,6 +12,7 @@ import zipfile
 import tempfile
 import sys
 from typing import Dict, List, Any
+import re
 
 try:
     from flask import Flask, jsonify, request
@@ -33,6 +34,63 @@ app = Flask(__name__)
 
 # Set up CORS for React frontend
 CORS(app, origins=['http://localhost:3000'])
+
+
+def parse_dependencies(directory_path: str) -> List[str]:
+    """
+    Parse dependencies from requirements.txt file in the provided directory.
+    
+    Args:
+        directory_path: Path to the directory to search for requirements.txt
+        
+    Returns:
+        List of dependency package names (without version specifications)
+    """
+    requirements_path = os.path.join(directory_path, 'requirements.txt')
+    dependencies = []
+    
+    # Check if requirements.txt exists
+    if not os.path.exists(requirements_path):
+        return dependencies
+    
+    try:
+        with open(requirements_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                # Strip whitespace
+                line = line.strip()
+                
+                # Skip empty lines and comments
+                if not line or line.startswith('#'):
+                    continue
+                
+                # Parse package name (everything before version specifiers)
+                # Handle various version specifiers: ==, >=, <=, >, <, !=, ~=
+                # Also handle git+, -e, and other special cases
+                if line.startswith('-e ') or line.startswith('--editable '):
+                    # Skip editable installs for now
+                    continue
+                
+                if line.startswith('git+') or line.startswith('http'):
+                    # For git/http URLs, try to extract package name from URL
+                    # This is a basic implementation - could be enhanced
+                    if '#egg=' in line:
+                        egg_part = line.split('#egg=')[1]
+                        package_name = egg_part.split('&')[0].split('[')[0]
+                        if package_name:
+                            dependencies.append(package_name)
+                    continue
+                
+                # Regular package with version specifiers
+                # Remove everything after version specifiers
+                package_match = re.match(r'^([a-zA-Z0-9_.-]+)', line)
+                if package_match:
+                    package_name = package_match.group(1)
+                    dependencies.append(package_name)
+    
+    except (UnicodeDecodeError, IOError) as e:
+        print(f"DEBUG: Failed to read requirements.txt: {str(e)}", file=sys.stderr)
+    
+    return dependencies
 
 
 def analyze_python_file(file_path: str) -> Dict[str, Any]:
@@ -88,13 +146,13 @@ def analyze_python_file(file_path: str) -> Dict[str, Any]:
 
 def analyze_project(project_path: str) -> Dict[str, Any]:
     """
-    Analyze all Python files in a project directory.
+    Analyze all Python files in a project directory and parse dependencies.
     
     Args:
         project_path: Path to the project directory
         
     Returns:
-        Dictionary containing analysis results for all Python files
+        Dictionary containing analysis results for all Python files and dependencies
     """
     if not os.path.exists(project_path):
         raise FileNotFoundError(f"Project path does not exist: {project_path}")
@@ -102,11 +160,15 @@ def analyze_project(project_path: str) -> Dict[str, Any]:
     if not os.path.isdir(project_path):
         raise NotADirectoryError(f"Project path is not a directory: {project_path}")
     
+    # Parse dependencies from requirements.txt
+    dependencies = parse_dependencies(project_path)
+    
     analysis_results = {
         'project_path': os.path.abspath(project_path),
         'files_analyzed': 0,
         'total_lines_of_code': 0,
         'total_functions': 0,
+        'dependencies': dependencies,
         'files': []
     }
     
@@ -257,7 +319,14 @@ def analyze_project_endpoint():
             
             # Analyze the extracted project
             try:
-                analysis_results = analyze_project(extract_dir)
+                extracted_items = os.listdir(extract_dir)
+                analysis_path = extract_dir
+                if len(extracted_items) == 1 and os.path.isdir(os.path.join(extract_dir, extracted_items[0])):
+                    # If there's only one item and it's a directory, assume it's the project root
+                    analysis_path = os.path.join(extract_dir, extracted_items[0])
+                    print(f"DEBUG: Single root directory detected. Analyzing inside: {analysis_path}", file=sys.stderr)
+                    
+                analysis_results = analyze_project(analysis_path)
                 
                 # Check if any Python files were found
                 if analysis_results['files_analyzed'] == 0:

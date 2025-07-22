@@ -1,3 +1,6 @@
+import os
+import pandas as pd
+
 # test_project/test_app.py
 def complex_function(a, b, c):
     """
