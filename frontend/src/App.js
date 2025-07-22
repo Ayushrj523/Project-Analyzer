@@ -8,6 +8,7 @@ import { Alert, AlertDescription } from './components/ui/alert';
 import AnalysisReport from './AnalysisReport';
 import CodeCity from './CodeCity';
 import RiskMatrix from './RiskMatrix';
+import HealthGauges from './HealthGauges'
 
 function App() {
   const [file, setFile] = useState(null);
@@ -141,6 +142,8 @@ function App() {
             <AnalysisReport data={analysisResult} />
             <CodeCity data={analysisResult} />
             <RiskMatrix data={analysisResult} />
+            <HealthGauges data={analysisResult} />
+            <AnalysisReport data={analysisResult} />
           </div>
         )}
 
