@@ -1,11 +1,18 @@
 import React, { useState } from 'react';
-import AnalysisReport from './AnalysisReport'; // Import your table component
+import { Sparkles, Upload, Loader2 } from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle } from './components/ui/card';
+import { Button } from './components/ui/button';
+import { Input } from './components/ui/input';
+import { Label } from './components/ui/label';
+import { Alert, AlertDescription } from './components/ui/alert';
+import AnalysisReport from './AnalysisReport';
 import CodeCity from './CodeCity';
 
 function App() {
   const [file, setFile] = useState(null);
   const [analysisResult, setAnalysisResult] = useState(null);
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
   const handleFileChange = (e) => {
     const selectedFile = e.target.files[0];
@@ -39,6 +46,7 @@ function App() {
     formData.append('project_zip', file);
 
     try {
+      setLoading(true);
       setError('');
       setAnalysisResult(null);
       
@@ -56,64 +64,94 @@ function App() {
     } catch (err) {
       const errorMessage = err.message || 'An error occurred during analysis';
       setError(errorMessage);
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8 px-4">
-      <div className="max-w-2xl mx-auto">
-        <div className="bg-white rounded-lg shadow-md p-8">
-          <h1 className="text-2xl font-bold text-gray-800 mb-6 text-center">
-            Zip File Analyzer
-          </h1>
-          
-          <div className="space-y-6">
-            {/* File Input Section */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Select ZIP File
-              </label>
-              <div className="relative">
-                <input
-                  type="file"
-                  accept=".zip"
-                  onChange={handleFileChange}
-                  className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 file:cursor-pointer cursor-pointer border border-gray-300 rounded-md p-2"
-                />
-              </div>
+    <div className="min-h-screen bg-background flex">
+      {/* Left Sidebar */}
+      <div className="w-80 border-r bg-card p-6 flex flex-col">
+        <div className="flex items-center gap-2 mb-8">
+          <Sparkles className="h-6 w-6 text-primary" />
+          <h1 className="text-xl font-bold text-foreground">Project Analyzer</h1>
+        </div>
+
+        <Card className="flex-1">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Upload className="h-5 w-5" />
+              Upload Project
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="zip-upload">Select ZIP File</Label>
+              <Input
+                id="zip-upload"
+                type="file"
+                accept=".zip"
+                onChange={handleFileChange}
+                className="cursor-pointer"
+              />
               {file && (
-                <p className="mt-2 text-sm text-gray-600">
+                <p className="text-sm text-muted-foreground">
                   Selected: {file.name} ({(file.size / 1024 / 1024).toFixed(2)} MB)
                 </p>
               )}
             </div>
 
-            {/* Upload Button */}
-            <button
+            <Button
               onClick={handleUpload}
-              disabled={!file}
-              className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-semibold py-3 px-4 rounded-md transition duration-200"
+              disabled={!file || loading}
+              className="w-full"
             >
-              {!file ? 'Select a file to upload' : 'Analyze ZIP File'}
-            </button>
+              {loading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Analyzing...
+                </>
+              ) : (
+                'Analyze Project'
+              )}
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
 
-            {/* Error Display */}
-            {error && (
-              <div className="p-4 bg-red-50 border border-red-200 rounded-md">
-                <div className="flex">
-                  <div className="text-red-800">
-                    <h3 className="text-sm font-medium">Error</h3>
-                    <div className="mt-1 text-sm">{error}</div>
-                  </div>
-                </div>
-              </div>
-            )}
+      {/* Right Main Content Area */}
+      <div className="flex-1 p-6 overflow-auto">
+        {loading && (
+          <div className="flex flex-col items-center justify-center h-64 space-y-4">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            <p className="text-lg text-muted-foreground">Analyzing your project...</p>
           </div>
-        </div>
+        )}
 
-        {/* Analysis Report - Now uses your imported component */}
-        {analysisResult && <AnalysisReport data={analysisResult} />}
-        {analysisResult && <CodeCity data={analysisResult} />} 
+        {error && (
+          <Alert variant="destructive" className="mb-6">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+
+        {analysisResult && (
+          <div className="space-y-6">
+            <AnalysisReport data={analysisResult} />
+            <CodeCity data={analysisResult} />
+          </div>
+        )}
+
+        {!loading && !error && !analysisResult && (
+          <div className="flex flex-col items-center justify-center h-64 space-y-4">
+            <div className="text-center space-y-2">
+              <h2 className="text-2xl font-semibold text-foreground">Welcome to Project Analyzer</h2>
+              <p className="text-muted-foreground">
+                Upload a ZIP file containing your project to get started with the analysis.
+              </p>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
