@@ -3,7 +3,7 @@
 Flask Project Analyzer Server
 
 A Flask server that accepts zip files containing Python projects
-and analyzes them for complexity metrics and dependencies.
+and analyzes them for complexity metrics, dependencies, and code smells.
 """
 
 import os
@@ -11,6 +11,7 @@ import json
 import zipfile
 import tempfile
 import sys
+import ast
 from typing import Dict, List, Any
 import re
 
@@ -95,7 +96,7 @@ def parse_dependencies(directory_path: str) -> List[str]:
 
 def analyze_python_file(file_path: str) -> Dict[str, Any]:
     """
-    Analyze a single Python file for complexity metrics.
+    Analyze a single Python file for complexity metrics and code smells.
     
     Args:
         file_path: Path to the Python file to analyze
@@ -111,6 +112,7 @@ def analyze_python_file(file_path: str) -> Dict[str, Any]:
             'file_path': file_path,
             'lines_of_code': 0,
             'functions': [],
+            'code_smells': [],
             'error': f"Failed to read file: {str(e)}"
         }
     
@@ -137,10 +139,48 @@ def analyze_python_file(file_path: str) -> Dict[str, Any]:
     except Exception as e:
         print(f"DEBUG: A complexity analysis error occurred for {file_path}. Error: {e}", file=sys.stderr)
     
+    # Parse AST and detect code smells
+    code_smells = []
+    try:
+        tree = ast.parse(source_code)
+        
+        # Traverse the AST to detect code smells
+        for node in ast.walk(tree):
+            # Long Parameter List detection
+            if isinstance(node, ast.FunctionDef):
+                param_count = len(node.args.args)
+                if param_count > 5:
+                    code_smells.append({
+                        'type': 'Long Parameter List',
+                        'message': f'Function "{node.name}" has {param_count} parameters (more than 5)',
+                        'line_number': node.lineno
+                    })
+            
+            # Magic Numbers detection
+            elif isinstance(node, ast.Compare):
+                for comparator in node.comparators:
+                    if isinstance(comparator, ast.Constant) and isinstance(comparator.value, int):
+                        code_smells.append({
+                            'type': 'Magic Number',
+                            'message': f'Magic number {comparator.value} found in comparison',
+                            'line_number': comparator.lineno
+                        })
+    
+    except SyntaxError as e:
+        print(f"DEBUG: Syntax error in {file_path}: {str(e)}", file=sys.stderr)
+        code_smells.append({
+            'type': 'Syntax Error',
+            'message': f'Invalid Python syntax: {str(e)}',
+            'line_number': getattr(e, 'lineno', 0)
+        })
+    except Exception as e:
+        print(f"DEBUG: AST parsing error for {file_path}: {str(e)}", file=sys.stderr)
+    
     return {
         'file_path': file_path,
         'lines_of_code': lines_of_code,
-        'functions': functions
+        'functions': functions,
+        'code_smells': code_smells
     }
 
 
@@ -152,7 +192,7 @@ def analyze_project(project_path: str) -> Dict[str, Any]:
         project_path: Path to the project directory
         
     Returns:
-        Dictionary containing analysis results for all Python files and dependencies
+        Dictionary containing analysis results for all Python files, dependencies, and code smells
     """
     if not os.path.exists(project_path):
         raise FileNotFoundError(f"Project path does not exist: {project_path}")
@@ -168,6 +208,7 @@ def analyze_project(project_path: str) -> Dict[str, Any]:
         'files_analyzed': 0,
         'total_lines_of_code': 0,
         'total_functions': 0,
+        'total_code_smells': 0,
         'dependencies': dependencies,
         'files': []
     }
@@ -191,6 +232,7 @@ def analyze_project(project_path: str) -> Dict[str, Any]:
                 if 'error' not in file_analysis:
                     analysis_results['total_lines_of_code'] += file_analysis['lines_of_code']
                     analysis_results['total_functions'] += len(file_analysis['functions'])
+                    analysis_results['total_code_smells'] += len(file_analysis['code_smells'])
     
     return analysis_results
 

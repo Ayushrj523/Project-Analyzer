@@ -12,6 +12,17 @@ def complex_function(a, b, c):
         return "C"
     else:
         return "D"
+    
+
+# This function has a code smell: a long parameter list
+def function_with_many_params(a, b, c, d, e, f):
+    return a + b + c + d + e + f
+    
+# This function has a code smell: a "magic number"
+def check_status(status_code):
+    if status_code == 2:  # Magic number! What does 2 mean?
+        return "Active"
+    return "Inactive"
 
 def main():
     """Main execution function."""
