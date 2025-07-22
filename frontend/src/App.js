@@ -7,6 +7,7 @@ import { Label } from './components/ui/label';
 import { Alert, AlertDescription } from './components/ui/alert';
 import AnalysisReport from './AnalysisReport';
 import CodeCity from './CodeCity';
+import RiskMatrix from './RiskMatrix';
 
 function App() {
   const [file, setFile] = useState(null);
@@ -139,6 +140,7 @@ function App() {
           <div className="space-y-6">
             <AnalysisReport data={analysisResult} />
             <CodeCity data={analysisResult} />
+            <RiskMatrix data={analysisResult} />
           </div>
         )}
 
