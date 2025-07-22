@@ -24,6 +24,21 @@ def check_status(status_code):
         return "Active"
     return "Inactive"
 
+# ... at the end of the file ...
+
+# This function has high Cognitive Complexity due to nesting and breaks in flow
+def process_data(data, user_type):
+    if user_type == "admin": # +1
+        for item in data: # +2 (nesting)
+            if item['value'] > 100: # +3 (nesting)
+                return "High value item found" # break in flow
+    else: # +1
+        try: # +1, break in flow
+            result = 100 / len(data)
+            return result
+        except ZeroDivisionError: # +2 (nesting)
+            return "No data"
+
 def main():
     """Main execution function."""
     print("Running test application.")

@@ -4,6 +4,7 @@ Flask Project Analyzer Server
 
 A Flask server that accepts zip files containing Python projects
 and analyzes them for complexity metrics, dependencies, and code smells.
+Enhanced with Halstead and Cognitive complexity metrics.
 """
 
 import os
@@ -21,9 +22,10 @@ try:
     from dotenv import load_dotenv
     from radon.visitors import ComplexityVisitor
     from radon.raw import analyze
+    from cognitive_complexity.api import get_cognitive_complexity
 except ImportError as e:
     print(f"Error: Required libraries are missing. Install them with:")
-    print("pip install flask flask-cors python-dotenv radon")
+    print("pip install flask flask-cors python-dotenv radon cognitive_complexity")
     print(f"Missing: {e}")
     sys.exit(1)
 
@@ -94,15 +96,136 @@ def parse_dependencies(directory_path: str) -> List[str]:
     return dependencies
 
 
+def calculate_cognitive_complexity_from_ast(node) -> int:
+    """
+    Calculate cognitive complexity directly from AST node.
+    This is a robust implementation that doesn't rely on radon compatibility.
+    """
+    complexity = 0
+    nesting_level = 0
+    
+    def visit_node(node, nesting=0):
+        nonlocal complexity
+        
+        # Base complexity increment for control structures
+        if isinstance(node, (ast.If, ast.While, ast.For, ast.AsyncFor)):
+            complexity += 1 + nesting
+        elif isinstance(node, (ast.Try, ast.ExceptHandler)):
+            complexity += 1 + nesting
+        elif isinstance(node, ast.With):
+            complexity += 1 + nesting
+        elif isinstance(node, ast.BoolOp):
+            # Each additional boolean operator adds complexity
+            complexity += len(node.values) - 1
+        elif isinstance(node, ast.comprehension):
+            # List/dict/set comprehensions add complexity
+            complexity += 1 + nesting
+        
+        # Recursively visit child nodes with increased nesting for certain structures
+        for child in ast.iter_child_nodes(node):
+            new_nesting = nesting
+            if isinstance(node, (ast.If, ast.While, ast.For, ast.AsyncFor, ast.Try, ast.With)):
+                new_nesting = nesting + 1
+            visit_node(child, new_nesting)
+    
+    visit_node(node)
+    return complexity
+
+
+def calculate_halstead_from_ast(source_code: str) -> Dict[str, Any]:
+    """
+    Calculate Halstead metrics directly from AST.
+    More robust than relying on radon's implementation.
+    """
+    try:
+        tree = ast.parse(source_code)
+    except SyntaxError:
+        return {}
+    
+    operators = set()
+    operands = set()
+    operator_count = 0
+    operand_count = 0
+    
+    # Define Python operators
+    operator_nodes = (
+        ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Mod, ast.Pow, ast.LShift, ast.RShift,
+        ast.BitOr, ast.BitXor, ast.BitAnd, ast.FloorDiv, ast.And, ast.Or, ast.Not,
+        ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.Is, ast.IsNot,
+        ast.In, ast.NotIn, ast.UAdd, ast.USub, ast.Invert
+    )
+    
+    for node in ast.walk(tree):
+        # Count operators
+        if isinstance(node, operator_nodes):
+            op_name = type(node).__name__
+            operators.add(op_name)
+            operator_count += 1
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            operators.add(type(node).__name__)
+            operator_count += 1
+        elif isinstance(node, (ast.If, ast.While, ast.For, ast.AsyncFor)):
+            operators.add(type(node).__name__)
+            operator_count += 1
+        elif isinstance(node, (ast.Return, ast.Yield, ast.YieldFrom)):
+            operators.add(type(node).__name__)
+            operator_count += 1
+        
+        # Count operands (variables, constants, function names)
+        elif isinstance(node, ast.Name):
+            operands.add(node.id)
+            operand_count += 1
+        elif isinstance(node, ast.Constant):
+            operands.add(str(node.value))
+            operand_count += 1
+        elif isinstance(node, ast.Attribute):
+            operands.add(node.attr)
+            operand_count += 1
+    
+    h1 = len(operators)  # Distinct operators
+    h2 = len(operands)   # Distinct operands
+    N1 = operator_count  # Total operators
+    N2 = operand_count   # Total operands
+    
+    # Calculate derived metrics
+    vocabulary = h1 + h2
+    length = N1 + N2
+    
+    if vocabulary > 0 and length > 0:
+        import math
+        volume = length * math.log2(vocabulary)
+        difficulty = (h1 / 2) * (N2 / h2) if h2 > 0 else 0
+        effort = difficulty * volume
+        time_required = effort / 18  # Halstead's constant
+        bugs = volume / 3000  # Halstead's constant
+    else:
+        volume = difficulty = effort = time_required = bugs = 0
+    
+    return {
+        'h1': h1,
+        'h2': h2,
+        'N1': N1,
+        'N2': N2,
+        'vocabulary': vocabulary,
+        'length': length,
+        'volume': round(volume, 2),
+        'difficulty': round(difficulty, 2),
+        'effort': round(effort, 2),
+        'time': round(time_required, 2),
+        'bugs': round(bugs, 4)
+    }
+
+
 def analyze_python_file(file_path: str) -> Dict[str, Any]:
     """
     Analyze a single Python file for complexity metrics and code smells.
+    Now includes robust Halstead and Cognitive complexity metrics calculated directly from AST.
     
     Args:
         file_path: Path to the Python file to analyze
         
     Returns:
-        Dictionary containing file analysis results
+        Dictionary containing file analysis results with enhanced metrics
     """
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
@@ -113,31 +236,64 @@ def analyze_python_file(file_path: str) -> Dict[str, Any]:
             'lines_of_code': 0,
             'functions': [],
             'code_smells': [],
+            'halstead': {},
             'error': f"Failed to read file: {str(e)}"
         }
     
-    # Analyze raw metrics (lines of code)
+    # Analyze raw metrics (lines of code) using radon
+    lines_of_code = 0
     try:
         raw_analysis = analyze(source_code)
         lines_of_code = raw_analysis.loc  # Lines of code (excluding comments and blank lines)
+        print(f"DEBUG: Lines of code for {file_path}: {lines_of_code}", file=sys.stderr)
     except Exception as e:
-        lines_of_code = 0
+        print(f"DEBUG: Raw analysis error for {file_path}: {e}", file=sys.stderr)
+        # Fallback: count non-empty, non-comment lines
+        lines_of_code = len([line for line in source_code.split('\n') 
+                            if line.strip() and not line.strip().startswith('#')])
     
-    # Analyze complexity
+    # Calculate Halstead metrics using our robust AST-based implementation
+    halstead_metrics = calculate_halstead_from_ast(source_code)
+    print(f"DEBUG: Halstead metrics for {file_path}: {halstead_metrics}", file=sys.stderr)
+    
+    # Analyze complexity (both Cyclomatic and Cognitive)
     functions = []
     try:
+        # Parse AST for cognitive complexity calculation
+        tree = ast.parse(source_code)
+        
+        # Use radon for cyclomatic complexity
         complexity_visitor = ComplexityVisitor.from_code(source_code)
+        
+        # Create a mapping of function names to AST nodes for cognitive complexity
+        function_nodes = {}
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                function_nodes[node.name] = node
         
         for item in complexity_visitor.blocks:
             # Check if the item has the required attributes for a function/method
             if hasattr(item, 'name') and hasattr(item, 'complexity') and hasattr(item, 'lineno'):
+                # Calculate cognitive complexity using our AST-based method
+                cognitive_comp = 0
+                if item.name in function_nodes:
+                    cognitive_comp = calculate_cognitive_complexity_from_ast(function_nodes[item.name])
+                    print(f"DEBUG: Cognitive complexity for {item.name}: {cognitive_comp}", file=sys.stderr)
+                
                 functions.append({
                     'name': item.name,
-                    'complexity': item.complexity,
-                    'line_number': item.lineno
+                    'cyclomatic_complexity': item.complexity,  # From radon
+                    'cognitive_complexity': cognitive_comp,    # From our AST implementation
+                    'line_number': item.lineno,
+                    'halstead': None  # Individual function Halstead metrics not calculated for now
                 })
+                
+                print(f"DEBUG: Function {item.name} - Cyclomatic: {item.complexity}, Cognitive: {cognitive_comp}", file=sys.stderr)
+        
     except Exception as e:
         print(f"DEBUG: A complexity analysis error occurred for {file_path}. Error: {e}", file=sys.stderr)
+        import traceback
+        print(f"DEBUG: Traceback: {traceback.format_exc()}", file=sys.stderr)
     
     # Parse AST and detect code smells
     code_smells = []
@@ -180,13 +336,15 @@ def analyze_python_file(file_path: str) -> Dict[str, Any]:
         'file_path': file_path,
         'lines_of_code': lines_of_code,
         'functions': functions,
-        'code_smells': code_smells
+        'code_smells': code_smells,
+        'halstead': halstead_metrics
     }
 
 
 def analyze_project(project_path: str) -> Dict[str, Any]:
     """
     Analyze all Python files in a project directory and parse dependencies.
+    Now aggregates Halstead and Cognitive complexity metrics.
     
     Args:
         project_path: Path to the project directory
@@ -209,6 +367,16 @@ def analyze_project(project_path: str) -> Dict[str, Any]:
         'total_lines_of_code': 0,
         'total_functions': 0,
         'total_code_smells': 0,
+        'total_cyclomatic_complexity': 0,
+        'total_cognitive_complexity': 0,
+        'average_cyclomatic_complexity': 0,
+        'average_cognitive_complexity': 0,
+        'total_halstead_volume': 0,
+        'total_halstead_difficulty': 0,
+        'total_halstead_effort': 0,
+        'average_halstead_volume': 0,
+        'average_halstead_difficulty': 0,
+        'average_halstead_effort': 0,
         'dependencies': dependencies,
         'files': []
     }
@@ -233,6 +401,38 @@ def analyze_project(project_path: str) -> Dict[str, Any]:
                     analysis_results['total_lines_of_code'] += file_analysis['lines_of_code']
                     analysis_results['total_functions'] += len(file_analysis['functions'])
                     analysis_results['total_code_smells'] += len(file_analysis['code_smells'])
+                    
+                    # Aggregate complexity metrics
+                    for func in file_analysis['functions']:
+                        analysis_results['total_cyclomatic_complexity'] += func.get('cyclomatic_complexity', 0)
+                        analysis_results['total_cognitive_complexity'] += func.get('cognitive_complexity', 0)
+                    
+                    # Aggregate Halstead metrics
+                    halstead = file_analysis.get('halstead', {})
+                    if halstead:
+                        analysis_results['total_halstead_volume'] += halstead.get('volume', 0)
+                        analysis_results['total_halstead_difficulty'] += halstead.get('difficulty', 0)
+                        analysis_results['total_halstead_effort'] += halstead.get('effort', 0)
+    
+    # Calculate averages
+    if analysis_results['total_functions'] > 0:
+        analysis_results['average_cyclomatic_complexity'] = round(
+            analysis_results['total_cyclomatic_complexity'] / analysis_results['total_functions'], 2
+        )
+        analysis_results['average_cognitive_complexity'] = round(
+            analysis_results['total_cognitive_complexity'] / analysis_results['total_functions'], 2
+        )
+    
+    if analysis_results['files_analyzed'] > 0:
+        analysis_results['average_halstead_volume'] = round(
+            analysis_results['total_halstead_volume'] / analysis_results['files_analyzed'], 2
+        )
+        analysis_results['average_halstead_difficulty'] = round(
+            analysis_results['total_halstead_difficulty'] / analysis_results['files_analyzed'], 2
+        )
+        analysis_results['average_halstead_effort'] = round(
+            analysis_results['total_halstead_effort'] / analysis_results['files_analyzed'], 2
+        )
     
     return analysis_results
 
