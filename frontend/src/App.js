@@ -9,6 +9,7 @@ import AnalysisReport from './AnalysisReport';
 import CodeCity from './CodeCity';
 import RiskMatrix from './RiskMatrix';
 import HealthGauges from './HealthGauges'
+import DependencyGraph from './DependencyGraph';
 
 function App() {
   const [file, setFile] = useState(null);
@@ -144,6 +145,7 @@ function App() {
             <RiskMatrix data={analysisResult} />
             <HealthGauges data={analysisResult} />
             <AnalysisReport data={analysisResult} />
+            <DependencyGraph data={analysisResult} />
           </div>
         )}
 
