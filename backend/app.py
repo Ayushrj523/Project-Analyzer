@@ -4,7 +4,7 @@ Flask Project Analyzer Server
 
 A Flask server that accepts zip files containing Python projects
 and analyzes them for complexity metrics, dependencies, and code smells.
-Enhanced with Halstead and Cognitive complexity metrics.
+Enhanced with Halstead and Cognitive complexity metrics and internal dependency graph.
 """
 
 import os
@@ -37,6 +37,32 @@ app = Flask(__name__)
 
 # Set up CORS for React frontend
 CORS(app, origins=['http://localhost:3000'])
+
+
+class ImportVisitor(ast.NodeVisitor):
+    """AST visitor to extract import statements from Python files."""
+    
+    def __init__(self):
+        self.imports = []
+    
+    def visit_Import(self, node):
+        """Visit import statements like 'import os, sys'."""
+        for alias in node.names:
+            self.imports.append(alias.name)
+        self.generic_visit(node)
+    
+    def visit_ImportFrom(self, node):
+        """Visit from-import statements like 'from os.path import join'."""
+        if node.module:
+            self.imports.append(node.module)
+        elif node.level > 0:
+            # Handle relative imports like 'from .utils import helper'
+            # Convert relative imports to a standardized format
+            relative_import = '.' * node.level
+            if node.module:
+                relative_import += node.module
+            self.imports.append(relative_import)
+        self.generic_visit(node)
 
 
 def parse_dependencies(directory_path: str) -> List[str]:
@@ -219,13 +245,14 @@ def calculate_halstead_from_ast(source_code: str) -> Dict[str, Any]:
 def analyze_python_file(file_path: str) -> Dict[str, Any]:
     """
     Analyze a single Python file for complexity metrics and code smells.
-    Now includes robust Halstead and Cognitive complexity metrics calculated directly from AST.
+    Now includes robust Halstead and Cognitive complexity metrics calculated directly from AST,
+    and extracts import statements for dependency graph generation.
     
     Args:
         file_path: Path to the Python file to analyze
         
     Returns:
-        Dictionary containing file analysis results with enhanced metrics
+        Dictionary containing file analysis results with enhanced metrics and imports
     """
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
@@ -237,6 +264,7 @@ def analyze_python_file(file_path: str) -> Dict[str, Any]:
             'functions': [],
             'code_smells': [],
             'halstead': {},
+            'imports': [],
             'error': f"Failed to read file: {str(e)}"
         }
     
@@ -255,6 +283,24 @@ def analyze_python_file(file_path: str) -> Dict[str, Any]:
     # Calculate Halstead metrics using our robust AST-based implementation
     halstead_metrics = calculate_halstead_from_ast(source_code)
     print(f"DEBUG: Halstead metrics for {file_path}: {halstead_metrics}", file=sys.stderr)
+    
+    # Parse AST and extract imports
+    imports = []
+    try:
+        tree = ast.parse(source_code)
+        
+        # Extract imports using our custom visitor
+        import_visitor = ImportVisitor()
+        import_visitor.visit(tree)
+        imports = import_visitor.imports
+        print(f"DEBUG: Imports for {file_path}: {imports}", file=sys.stderr)
+        
+    except SyntaxError as e:
+        print(f"DEBUG: Syntax error in {file_path}: {str(e)}", file=sys.stderr)
+        imports = []
+    except Exception as e:
+        print(f"DEBUG: Import parsing error for {file_path}: {str(e)}", file=sys.stderr)
+        imports = []
     
     # Analyze complexity (both Cyclomatic and Cognitive)
     functions = []
@@ -337,20 +383,21 @@ def analyze_python_file(file_path: str) -> Dict[str, Any]:
         'lines_of_code': lines_of_code,
         'functions': functions,
         'code_smells': code_smells,
-        'halstead': halstead_metrics
+        'halstead': halstead_metrics,
+        'imports': imports
     }
 
 
 def analyze_project(project_path: str) -> Dict[str, Any]:
     """
     Analyze all Python files in a project directory and parse dependencies.
-    Now aggregates Halstead and Cognitive complexity metrics.
+    Now aggregates Halstead and Cognitive complexity metrics and builds internal dependency graph.
     
     Args:
         project_path: Path to the project directory
         
     Returns:
-        Dictionary containing analysis results for all Python files, dependencies, and code smells
+        Dictionary containing analysis results for all Python files, dependencies, code smells, and dependency graph
     """
     if not os.path.exists(project_path):
         raise FileNotFoundError(f"Project path does not exist: {project_path}")
@@ -378,8 +425,16 @@ def analyze_project(project_path: str) -> Dict[str, Any]:
         'average_halstead_difficulty': 0,
         'average_halstead_effort': 0,
         'dependencies': dependencies,
-        'files': []
+        'files': [],
+        'graph': {
+            'nodes': [],
+            'edges': []
+        }
     }
+    
+    # First pass: collect all files and their analysis
+    file_path_to_relative = {}  # Map absolute paths to relative paths
+    relative_to_module = {}     # Map relative paths to module names
     
     # Walk through all files in the project directory
     for root, dirs, files in os.walk(project_path):
@@ -391,11 +446,26 @@ def analyze_project(project_path: str) -> Dict[str, Any]:
                 file_path = os.path.join(root, file)
                 relative_path = os.path.relpath(file_path, project_path)
                 
+                # Map file paths for dependency graph creation
+                file_path_to_relative[file_path] = relative_path
+                
+                # Convert file path to module name (e.g., src/utils.py -> src.utils)
+                module_name = relative_path.replace(os.sep, '.').replace('.py', '')
+                if module_name.endswith('.__init__'):
+                    module_name = module_name[:-9]  # Remove .__init__
+                relative_to_module[relative_path] = module_name
+                
                 file_analysis = analyze_python_file(file_path)
                 file_analysis['relative_path'] = relative_path
                 
                 analysis_results['files'].append(file_analysis)
                 analysis_results['files_analyzed'] += 1
+                
+                # Add node to graph
+                analysis_results['graph']['nodes'].append({
+                    'id': relative_path,
+                    'label': relative_path
+                })
                 
                 if 'error' not in file_analysis:
                     analysis_results['total_lines_of_code'] += file_analysis['lines_of_code']
@@ -413,6 +483,77 @@ def analyze_project(project_path: str) -> Dict[str, Any]:
                         analysis_results['total_halstead_volume'] += halstead.get('volume', 0)
                         analysis_results['total_halstead_difficulty'] += halstead.get('difficulty', 0)
                         analysis_results['total_halstead_effort'] += halstead.get('effort', 0)
+    
+    # Second pass: create edges for internal dependencies
+    module_to_relative = {v: k for k, v in relative_to_module.items()}  # Reverse mapping
+    
+    for file_analysis in analysis_results['files']:
+        if 'error' in file_analysis:
+            continue
+            
+        source_file = file_analysis['relative_path']
+        source_dir = os.path.dirname(source_file)
+        
+        for imported_module in file_analysis.get('imports', []):
+            target_file = None
+            
+            # Handle different types of imports
+            if imported_module.startswith('.'):
+                # Relative import
+                if imported_module == '.':
+                    # Import from current directory's __init__.py
+                    init_file = os.path.join(source_dir, '__init__.py')
+                    if init_file in relative_to_module:
+                        target_file = init_file
+                else:
+                    # Calculate the target module path for relative imports
+                    level = len(imported_module) - len(imported_module.lstrip('.'))
+                    module_part = imported_module[level:]
+                    
+                    # Go up the directory tree based on the level
+                    current_dir = source_dir
+                    for _ in range(level - 1):
+                        current_dir = os.path.dirname(current_dir)
+                        if not current_dir:
+                            break
+                    
+                    if module_part:
+                        if current_dir:
+                            target_module = f"{current_dir.replace(os.sep, '.')}.{module_part}"
+                        else:
+                            target_module = module_part
+                    else:
+                        target_module = current_dir.replace(os.sep, '.')
+                    
+                    # Find the corresponding file
+                    if target_module in module_to_relative:
+                        target_file = module_to_relative[target_module]
+                    else:
+                        # Try with __init__.py
+                        init_module = f"{target_module}.__init__"
+                        if init_module in module_to_relative:
+                            target_file = module_to_relative[init_module]
+            else:
+                # Absolute import within the project
+                if imported_module in module_to_relative:
+                    target_file = module_to_relative[imported_module]
+                else:
+                    # Try to find the module by matching parts
+                    for module_name, rel_path in module_to_relative.items():
+                        if imported_module.startswith(module_name) or module_name.startswith(imported_module):
+                            target_file = rel_path
+                            break
+            
+            # Create edge if target file is found within the project
+            if target_file and target_file != source_file:
+                edge = {
+                    'source': source_file,
+                    'target': target_file
+                }
+                # Avoid duplicate edges
+                if edge not in analysis_results['graph']['edges']:
+                    analysis_results['graph']['edges'].append(edge)
+                    print(f"DEBUG: Created edge from {source_file} to {target_file}", file=sys.stderr)
     
     # Calculate averages
     if analysis_results['total_functions'] > 0:
@@ -433,6 +574,8 @@ def analyze_project(project_path: str) -> Dict[str, Any]:
         analysis_results['average_halstead_effort'] = round(
             analysis_results['total_halstead_effort'] / analysis_results['files_analyzed'], 2
         )
+    
+    print(f"DEBUG: Graph created with {len(analysis_results['graph']['nodes'])} nodes and {len(analysis_results['graph']['edges'])} edges", file=sys.stderr)
     
     return analysis_results
 
